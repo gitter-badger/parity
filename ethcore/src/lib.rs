@@ -130,6 +130,7 @@ mod basic_types;
 mod env_info;
 mod pod_account;
 mod state;
+mod state_db;
 mod account;
 mod account_db;
 mod builtin;

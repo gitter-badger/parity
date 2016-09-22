@@ -19,6 +19,7 @@
 use common::*;
 use engines::Engine;
 use state::*;
+use state_db::StateDB;
 use verification::PreverifiedBlock;
 use trace::FlatTrace;
 use evm::Factory as EvmFactory;
@@ -178,7 +179,7 @@ pub trait IsBlock {
 /// Trait for a object that has a state database.
 pub trait Drain {
 	/// Drop this object and return the underlieing database.
-	fn drain(self) -> Box<JournalDB>;
+	fn drain(self) -> StateDB;
 }
 
 impl IsBlock for ExecutedBlock {
@@ -233,7 +234,7 @@ impl<'x> OpenBlock<'x> {
 		vm_factory: &'x EvmFactory,
 		trie_factory: TrieFactory,
 		tracing: bool,
-		db: Box<JournalDB>,
+		db: StateDB,
 		parent: &Header,
 		last_hashes: Arc<LastHashes>,
 		author: Address,
@@ -465,7 +466,7 @@ impl LockedBlock {
 
 impl Drain for LockedBlock {
 	/// Drop this object and return the underlieing database.
-	fn drain(self) -> Box<JournalDB> { self.block.state.drop().1 }
+	fn drain(self) -> StateDB { self.block.state.drop().1 }
 }
 
 impl SealedBlock {
@@ -481,7 +482,7 @@ impl SealedBlock {
 
 impl Drain for SealedBlock {
 	/// Drop this object and return the underlieing database.
-	fn drain(self) -> Box<JournalDB> { self.block.state.drop().1 }
+	fn drain(self) -> StateDB { self.block.state.drop().1 }
 }
 
 impl IsBlock for SealedBlock {
@@ -496,7 +497,7 @@ pub fn enact(
 	uncles: &[Header],
 	engine: &Engine,
 	tracing: bool,
-	db: Box<JournalDB>,
+	db: StateDB,
 	parent: &Header,
 	last_hashes: Arc<LastHashes>,
 	vm_factory: &EvmFactory,
@@ -529,7 +530,7 @@ pub fn enact_bytes(
 	block_bytes: &[u8],
 	engine: &Engine,
 	tracing: bool,
-	db: Box<JournalDB>,
+	db: StateDB,
 	parent: &Header,
 	last_hashes: Arc<LastHashes>,
 	vm_factory: &EvmFactory,
@@ -546,7 +547,7 @@ pub fn enact_verified(
 	block: &PreverifiedBlock,
 	engine: &Engine,
 	tracing: bool,
-	db: Box<JournalDB>,
+	db: StateDB,
 	parent: &Header,
 	last_hashes: Arc<LastHashes>,
 	vm_factory: &EvmFactory,
@@ -562,7 +563,7 @@ pub fn enact_and_seal(
 	block_bytes: &[u8],
 	engine: &Engine,
 	tracing: bool,
-	db: Box<JournalDB>,
+	db: StateDB,
 	parent: &Header,
 	last_hashes: Arc<LastHashes>,
 	vm_factory: &EvmFactory,
@@ -583,7 +584,7 @@ mod tests {
 		use spec::*;
 		let spec = Spec::new_test();
 		let genesis_header = spec.genesis_header();
-		let mut db_result = get_temp_journal_db();
+		let mut db_result = get_temp_state_db();
 		let mut db = db_result.take();
 		spec.ensure_db_good(db.as_hashdb_mut()).unwrap();
 		let last_hashes = Arc::new(vec![genesis_header.hash()]);
@@ -600,7 +601,7 @@ mod tests {
 		let engine = &*spec.engine;
 		let genesis_header = spec.genesis_header();
 
-		let mut db_result = get_temp_journal_db();
+		let mut db_result = get_temp_state_db();
 		let mut db = db_result.take();
 		spec.ensure_db_good(db.as_hashdb_mut()).unwrap();
 		let vm_factory = Default::default();
@@ -610,7 +611,7 @@ mod tests {
 		let orig_bytes = b.rlp_bytes();
 		let orig_db = b.drain();
 
-		let mut db_result = get_temp_journal_db();
+		let mut db_result = get_temp_state_db();
 		let mut db = db_result.take();
 		spec.ensure_db_good(db.as_hashdb_mut()).unwrap();
 		let e = enact_and_seal(&orig_bytes, engine, false, db, &genesis_header, last_hashes, &Default::default(), Default::default()).unwrap();
@@ -629,7 +630,7 @@ mod tests {
 		let engine = &*spec.engine;
 		let genesis_header = spec.genesis_header();
 
-		let mut db_result = get_temp_journal_db();
+		let mut db_result = get_temp_state_db();
 		let mut db = db_result.take();
 		spec.ensure_db_good(db.as_hashdb_mut()).unwrap();
 		let vm_factory = Default::default();
@@ -646,7 +647,7 @@ mod tests {
 		let orig_bytes = b.rlp_bytes();
 		let orig_db = b.drain();
 
-		let mut db_result = get_temp_journal_db();
+		let mut db_result = get_temp_state_db();
 		let mut db = db_result.take();
 		spec.ensure_db_good(db.as_hashdb_mut()).unwrap();
 		let e = enact_and_seal(&orig_bytes, engine, false, db, &genesis_header, last_hashes, &Default::default(), Default::default()).unwrap();

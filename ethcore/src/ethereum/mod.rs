@@ -65,7 +65,7 @@ mod tests {
 		let spec = new_morden();
 		let engine = &spec.engine;
 		let genesis_header = spec.genesis_header();
-		let mut db_result = get_temp_journal_db();
+		let mut db_result = get_temp_state_db();
 		let mut db = db_result.take();
 		spec.ensure_db_good(db.as_hashdb_mut()).unwrap();
 		let s = State::from_existing(db, genesis_header.state_root.clone(), engine.account_start_nonce(), Default::default()).unwrap();

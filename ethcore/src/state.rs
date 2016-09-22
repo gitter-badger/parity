@@ -25,6 +25,7 @@ use trace::FlatTrace;
 use pod_account::*;
 use pod_state::{self, PodState};
 use types::state_diff::StateDiff;
+use state_db::StateDB;
 
 /// Used to return information about an `State::apply` operation.
 pub struct ApplyOutcome {
@@ -39,7 +40,7 @@ pub type ApplyResult = Result<ApplyOutcome, Error>;
 
 /// Representation of the entire state of all accounts in the system.
 pub struct State {
-	db: Box<JournalDB>,
+	db: StateDB,
 	root: H256,
 	cache: RefCell<HashMap<Address, Option<Account>>>,
 	snapshots: RefCell<Vec<HashMap<Address, Option<Option<Account>>>>>,
@@ -53,7 +54,7 @@ const SEC_TRIE_DB_UNWRAP_STR: &'static str = "A state can only be created with v
 impl State {
 	/// Creates new state with empty state root
 	#[cfg(test)]
-	pub fn new(mut db: Box<JournalDB>, account_start_nonce: U256, trie_factory: TrieFactory) -> State {
+	pub fn new(mut db: StateDB, account_start_nonce: U256, trie_factory: TrieFactory) -> State {
 		let mut root = H256::new();
 		{
 			// init trie and reset root too null
@@ -71,7 +72,7 @@ impl State {
 	}
 
 	/// Creates new state with existing state root
-	pub fn from_existing(db: Box<JournalDB>, root: H256, account_start_nonce: U256, trie_factory: TrieFactory) -> Result<State, TrieError> {
+	pub fn from_existing(db: StateDB, root: H256, account_start_nonce: U256, trie_factory: TrieFactory) -> Result<State, TrieError> {
 		if !db.as_hashdb().contains(&root) {
 			return Err(TrieError::InvalidStateRoot(root));
 		}
@@ -141,7 +142,7 @@ impl State {
 	}
 
 	/// Destroy the current object and return root and database.
-	pub fn drop(self) -> (H256, Box<JournalDB>) {
+	pub fn drop(self) -> (H256, StateDB) {
 		(self.root, self.db)
 	}
 
@@ -250,7 +251,7 @@ impl State {
 	#[cfg_attr(feature="dev", allow(match_ref_pats))]
 	pub fn commit_into(
 		trie_factory: &TrieFactory,
-		db: &mut HashDB,
+		db: &mut StateDB,
 		root: &mut H256,
 		accounts: &mut HashMap<Address,
 		Option<Account>>
@@ -260,7 +261,8 @@ impl State {
 		for (address, ref mut a) in accounts.iter_mut() {
 			match a {
 				&mut&mut Some(ref mut account) if account.is_dirty() => {
-					let mut account_db = AccountDBMut::from_hash(db, account.address_hash(address));
+					db.add_to_filter(address);
+					let mut account_db = AccountDBMut::from_hash(db.as_hashdb_mut(), account.address_hash(address));
 					account.commit_storage(trie_factory, &mut account_db);
 					account.commit_code(&mut account_db);
 				}
@@ -269,7 +271,7 @@ impl State {
 		}
 
 		{
-			let mut trie = trie_factory.from_existing(db, root).unwrap();
+			let mut trie = trie_factory.from_existing(db.as_hashdb_mut(), root).unwrap();
 			for (address, ref mut a) in accounts.iter_mut() {
 				match **a {
 					Some(ref mut account) if account.is_dirty() => {
@@ -288,7 +290,7 @@ impl State {
 	/// Commits our cached account changes into the trie.
 	pub fn commit(&mut self) -> Result<(), Error> {
 		assert!(self.snapshots.borrow().is_empty());
-		Self::commit_into(&self.trie_factory, self.db.as_hashdb_mut(), &mut self.root, &mut *self.cache.borrow_mut())
+		Self::commit_into(&self.trie_factory, &mut self.db, &mut self.root, &mut *self.cache.borrow_mut())
 	}
 
 	/// Clear state cache
@@ -346,10 +348,15 @@ impl State {
 		where F: FnOnce(&Option<Account>) -> U {
 		let have_key = self.cache.borrow().contains_key(a);
 		if !have_key {
-			let db = self.trie_factory.readonly(self.db.as_hashdb(), &self.root).expect(SEC_TRIE_DB_UNWRAP_STR);
-			let maybe_acc = match db.get(a) {
-				Ok(acc) => acc.map(Account::from_rlp),
-				Err(e) => panic!("Potential DB corruption encountered: {}", e),
+			let maybe_acc = match self.db.filter_contains(a) {
+				true => {
+					let db = self.trie_factory.readonly(self.db.as_hashdb(), &self.root).expect(SEC_TRIE_DB_UNWRAP_STR);
+					match db.get(a) {
+						Ok(acc) => acc.map(Account::from_rlp),
+						Err(e) => panic!("Potential DB corruption encountered: {}", e),
+					}
+				},
+				false => None,
 			};
 			self.insert_cache(a, maybe_acc);
 		}

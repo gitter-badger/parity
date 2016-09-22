@@ -23,7 +23,6 @@ use time::precise_time_ns;
 
 // util
 use util::{journaldb, rlp, Bytes, View, PerfTimer, Itertools, Mutex, RwLock};
-use util::journaldb::JournalDB;
 use util::rlp::{UntrustedRlp};
 use util::numbers::*;
 use util::sha3::*;
@@ -65,6 +64,7 @@ use evm::Factory as EvmFactory;
 use miner::{Miner, MinerService};
 use util::TrieFactory;
 use snapshot::{self, io as snapshot_io};
+use state_db::StateDB;
 
 // re-export
 pub use types::blockchain_info::BlockChainInfo;
@@ -124,7 +124,7 @@ pub struct Client {
 	tracedb: Arc<TraceDB<BlockChain>>,
 	engine: Arc<Engine>,
 	db: Arc<Database>,
-	state_db: Mutex<Box<JournalDB>>,
+	state_db: Mutex<StateDB>,
 	block_queue: BlockQueue,
 	report: RwLock<ClientReport>,
 	import_lock: Mutex<()>,
@@ -184,14 +184,15 @@ impl Client {
 		let chain = Arc::new(BlockChain::new(config.blockchain, &gb, db.clone()));
 		let tracedb = Arc::new(try!(TraceDB::new(config.tracing, db.clone(), chain.clone())));
 
-		let mut state_db = journaldb::new(db.clone(), config.pruning, DB_COL_STATE);
-		if state_db.is_empty() && try!(spec.ensure_db_good(state_db.as_hashdb_mut())) {
+		let journal_db = journaldb::new(db.clone(), config.pruning, DB_COL_STATE);
+		let mut state_db = StateDB::new(journal_db);
+		if state_db.journal_db().is_empty() && try!(spec.ensure_db_good(&mut state_db)) {
 			let batch = DBTransaction::new(&db);
 			try!(state_db.commit(&batch, 0, &spec.genesis_header().hash(), None));
 			try!(db.write(batch).map_err(ClientError::Database));
 		}
 
-		if !chain.block_header(&chain.best_block_hash()).map_or(true, |h| state_db.contains(h.state_root())) {
+		if !chain.block_header(&chain.best_block_hash()).map_or(true, |h| state_db.journal_db().contains(h.state_root())) {
 			warn!("State root not found for block #{} ({})", chain.best_block_number(), chain.best_block_hash().hex());
 		}
 
@@ -600,7 +601,7 @@ impl Client {
 	/// Take a snapshot at the given block.
 	/// If the ID given is "latest", this will default to 1000 blocks behind.
 	pub fn take_snapshot<W: snapshot_io::SnapshotWriter + Send>(&self, writer: W, at: BlockID, p: &snapshot::Progress) -> Result<(), ::error::Error> {
-		let db = self.state_db.lock().boxed_clone();
+		let db = self.state_db.lock().journal_db().boxed_clone();
 		let best_block_number = self.chain_info().best_block_number;
 		let block_number = try!(self.block_number(at).ok_or(snapshot::Error::InvalidStartingBlock(at)));
 
@@ -881,7 +882,7 @@ impl BlockChainClient for Client {
 	}
 
 	fn state_data(&self, hash: &H256) -> Option<Bytes> {
-		self.state_db.lock().state(hash)
+		self.state_db.lock().journal_db().state(hash)
 	}
 
 	fn block_receipts(&self, hash: &H256) -> Option<Bytes> {
