@@ -30,6 +30,49 @@ use rand::os::OsRng;
 use bytes::{BytesConvertable,Populatable};
 use bigint::uint::{Uint, U256};
 
+
+#[inline(always)]
+fn bloom_mask(m : usize) -> (usize, usize) {
+	let bloom_bits = m << 3;
+	let mask = bloom_bits - 1;
+	let bloom_bytes = (log2(bloom_bits) + 7) / 8;
+
+	(bloom_bytes as usize, mask)
+}
+
+fn set_bloom(filter: &mut [u8], p: usize, val: &[u8]) {
+	let m = filter.len();
+	let (bloom_bytes, mask) = bloom_mask(m);
+	let mut ptr = 0;
+	for _ in 0..p {
+		let mut index = 0 as usize;
+		for _ in 0..bloom_bytes {
+			index = (index << 8) | val[ptr] as usize;
+			ptr += 1;
+		}
+		index &= mask;
+		filter[m - 1 - index / 8] |= 1 << (index % 8);
+	}
+}
+
+fn contains_bloom(filter: &[u8], p: usize, val: &[u8]) -> bool {
+	let m = filter.len();
+	let (bloom_bytes, mask) = bloom_mask(m);
+	let mut ptr = 0;
+	for _ in 0..p {
+		let mut index = 0 as usize;
+		for _ in 0..bloom_bytes {
+			index = (index << 8) | val[ptr] as usize;
+			ptr += 1;
+		}
+		index &= mask;
+		if filter[m - 1 - index / 8] & (1 << (index % 8)) == 0 {
+			return false;
+		}
+	}
+	return true;
+}
+
 /// Trait for a fixed-size byte array to be used as the output of hash functions.
 ///
 /// Note: types implementing `FixedHash` must be also `BytesConvertable`.
@@ -154,10 +197,7 @@ macro_rules! impl_hash {
 			}
 
 			fn shift_bloomed<'a, T>(&'a mut self, b: &T) -> &'a mut Self where T: FixedHash {
-				let bp: Self = b.bloom_part($size);
-				let new_self = &bp | self;
-
-				self.0 = new_self.0;
+				set_bloom(&mut self.0, 3, &b.as_slice()[..]);
 				self
 			}
 
@@ -197,8 +237,7 @@ macro_rules! impl_hash {
 			}
 
 			fn contains_bloomed<T>(&self, b: &T) -> bool where T: FixedHash {
-				let bp: Self = b.bloom_part($size);
-				self.contains(&bp)
+				contains_bloom(&self.0, 3, &b.as_slice()[..])
 			}
 
 			fn contains<'a>(&'a self, b: &'a Self) -> bool {
