@@ -313,7 +313,7 @@ fn should_add_decryption_to_the_queue() {
 	// when
 	let request = r#"{
 		"jsonrpc": "2.0",
-		"method": "eth_encryptMessage",
+		"method": "eth_decryptMessage",
 		"params": ["0x"#.to_owned() + &format!("{:?}", acc.public()) + r#"",
 		"0x01"],
 		"id": 1
