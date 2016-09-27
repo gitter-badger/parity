@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["Config","TestSyncProvider config."],["TestFetch","Test implementation of fetcher. Will always return the same file."],["TestMinerService","Test miner service."],["TestSyncProvider","Test sync provider."]]});
